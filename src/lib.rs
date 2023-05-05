@@ -1,4 +1,8 @@
 mod proxy;
+use std::sync::Arc;
+
+use futures_util::StreamExt;
+use proxy::dbus_wpa_interface::StaAuthorized;
 use proxy::{
     dbus_wpa::wpa_supplicant1Proxy, dbus_wpa_bss::BSSProxy, dbus_wpa_interface::InterfaceProxy,
 };
@@ -13,8 +17,8 @@ pub struct SupplicantError {}
 
 #[derive(Clone, Debug)]
 pub struct Supplicant<'a> {
-    conn: Connection,
-    proxy: wpa_supplicant1Proxy<'a>,
+    pub conn: Connection,
+    pub proxy: wpa_supplicant1Proxy<'a>,
 }
 impl<'a> Supplicant<'a> {
     /// Create a new `Supplicant` instance.
@@ -38,6 +42,13 @@ impl<'a> Supplicant<'a> {
         .into_iter()
         .collect::<Result<_>>()
     }
+
+    pub async fn iface_added(&'a self) -> proxy::dbus_wpa::InterfaceAddedStream {
+        self.proxy.receive_interface_added().await.unwrap()
+    }
+    pub async fn iface_removed(&'a self) -> proxy::dbus_wpa::InterfaceRemovedStream {
+        self.proxy.receive_interface_removed().await.unwrap()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -49,7 +60,7 @@ pub struct Interface<'a> {
 }
 
 impl<'a> Interface<'a> {
-    pub(crate) async fn new(
+    pub async fn new(
         conn: Connection,
         supplicant_proxy: &'a wpa_supplicant1Proxy<'_>,
         interface_path: OwnedObjectPath,
@@ -57,7 +68,7 @@ impl<'a> Interface<'a> {
         let proxy = InterfaceProxy::builder(&conn)
             .destination(SUPPLICANT_DBUS_NAME)?
             .path(interface_path.clone())?
-            .cache_properties(CacheProperties::No)
+            .cache_properties(CacheProperties::Lazily)
             .build()
             .await?;
 
@@ -91,6 +102,12 @@ impl<'a> Interface<'a> {
 
     pub async fn ifname(&'a self) -> Result<String> {
         self.proxy.ifname().await
+    }
+
+    pub async fn auth_signal(&'a self) -> zbus::PropertyStream<String> {
+        self.proxy.receive_state_changed().await
+        // let mut s = self.proxy.receive_all_signals().await.unwrap();
+
     }
 }
 
